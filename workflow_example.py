@@ -16,6 +16,8 @@ IDs and source text here are stand-ins for a demo, not literature citations).
 
 from __future__ import annotations
 
+import os
+
 from datetime import date
 
 from schemas import (
@@ -176,6 +178,17 @@ def verify_and_synthesize(pkg: EvidencePackage) -> Dossier:
         tier_breakdown=tier_breakdown,
         flags=flags, model_used="gpt-mock", runtime_seconds=2.7,
     )
+
+
+# Optionally use the real verifier implementation for integration checks.
+if os.environ.get("USE_REAL_VERIFIER") == "1":  # pragma: no cover - dev toggle
+    try:
+        from verifier import verify_and_synthesize as _real_v  # type: ignore
+
+        def verify_and_synthesize(pkg: EvidencePackage) -> Dossier:  # type: ignore[no-redef]
+            return _real_v(pkg, mode=os.environ.get("VERIFIER_MODE", "local"))
+    except Exception as _e:  # leave mock in place on import error
+        pass
 
 
 # =========================================================================== #
