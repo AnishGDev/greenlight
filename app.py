@@ -31,6 +31,7 @@ def build_benchmark_pair(
     target_id: str,
     disease_name: str,
     disease_id: str,
+    cutoff_date: date,
 ) -> BenchmarkPair:
     pair_id = make_pair_id(target_id.strip(), disease_id.strip())
     return BenchmarkPair(
@@ -39,6 +40,7 @@ def build_benchmark_pair(
         target_id=target_id.strip(),
         disease_name=disease_name.strip(),
         disease_id=disease_id.strip(),
+        cutoff_date=cutoff_date,
     )
 
 
@@ -396,34 +398,29 @@ def main() -> None:
         unsafe_allow_html=True,
     )
 
+    target_options = ["PCSK9", "HMGCR", "APOE", "TNF"]
+    disease_options = [
+        "hypercholesterolemia",
+        "Alzheimer disease",
+        "rheumatoid arthritis",
+    ]
+
     with st.form("benchmark_pair_form"):
-        target_col, target_id_col = st.columns([3, 2])
-        target_symbol = target_col.text_input("Target symbol", value="PCSK9")
-        target_id, target_suggestions = resolve_target_id(target_symbol)
-        target_id_col.text_input("Resolved target ID", value=target_id, disabled=True)
+        selected_targets = st.multiselect(
+            "Targets",
+            options=target_options,
+            default=["PCSK9"],
+            help="Select one or more targets.",
+        )
+        selected_diseases = st.multiselect(
+            "Diseases",
+            options=disease_options,
+            default=["hypercholesterolemia"],
+            help="Select one or more diseases.",
+        )
 
-        disease_col, disease_id_col = st.columns([3, 2])
-        disease_name = disease_col.text_input("Disease name", value="hypercholesterolemia")
-        disease_id, disease_suggestions = resolve_disease_id(disease_name)
-        disease_id_col.text_input("Resolved disease ID", value=disease_id, disabled=True)
-
-        if target_id == "unknown" and target_suggestions:
-            target_col.caption(
-                "Target lookup failed. Did you mean: "
-                + ", ".join(target_suggestions)
-                + "?"
-            )
-        elif target_id == "unknown":
-            target_col.caption("Target lookup failed. Please enter a standard symbol or gene name.")
-
-        if disease_id == "unknown" and disease_suggestions:
-            disease_col.caption(
-                "Disease lookup failed. Did you mean: "
-                + ", ".join(disease_suggestions)
-                + "?"
-            )
-        elif disease_id == "unknown":
-            disease_col.caption("Disease lookup failed. Please enter a standard disease name.")
+        candidate_pair_count = len(selected_targets) * len(selected_diseases)
+        st.caption(f"This will create {candidate_pair_count} BenchmarkPair object(s).")
 
         use_2010_cutoff = st.checkbox("Cutoff at 2010 (hide future data after 2010)", value=True)
         cutoff_date = date(2010, 1, 1) if use_2010_cutoff else date.today()
@@ -431,33 +428,68 @@ def main() -> None:
         submitted = st.form_submit_button("Check Theory for Viability")
 
     if submitted:
-        if target_id == "unknown" or disease_id == "unknown":
-            warning_text = "One or both IDs could not be resolved automatically. Please verify the target symbol and disease name."
-            if target_suggestions:
-                warning_text += " Target suggestions: " + ", ".join(target_suggestions) + "."
-            if disease_suggestions:
-                warning_text += " Disease suggestions: " + ", ".join(disease_suggestions) + "."
-            st.warning(warning_text)
+        if not selected_targets or not selected_diseases:
+            st.warning("Select at least one target and one disease.")
+        else:
+            created_pairs: list[BenchmarkPair] = []
+            unresolved_messages: list[str] = []
 
-        try:
-            benchmark_pair = build_benchmark_pair(
-                target_symbol,
-                target_id,
-                disease_name,
-                disease_id,
-            )
-            # st.success("BenchmarkPair created successfully")
-            # st.write("### Generated BenchmarkPair")
-            # st.write(f"**pair_id:** `{benchmark_pair.pair_id}`")
-            # st.json(benchmark_pair.model_dump(mode="json"))
+            for target_symbol in selected_targets:
+                for disease_name in selected_diseases:
+                    label = f"{target_symbol} | {disease_name}"
+                    target_id, target_suggestions = resolve_target_id(target_symbol)
+                    disease_id, disease_suggestions = resolve_disease_id(disease_name)
 
-            # st.markdown(
-            #     "---\n"
-            #     "The hidden benchmark fields are populated automatically for this mock interface. "
-            #     "You can extend this app later to collect labels and validation metadata."
-            # )
-        except Exception as exc:
-            st.error(f"Error creating BenchmarkPair: {exc}")
+                    if target_id == "unknown" or disease_id == "unknown":
+                        warning_text = f"{target_symbol} | {disease_name}: could not fully resolve IDs."
+                        if target_suggestions:
+                            warning_text += " Target suggestions: " + ", ".join(target_suggestions) + "."
+                        if disease_suggestions:
+                            warning_text += " Disease suggestions: " + ", ".join(disease_suggestions) + "."
+                        unresolved_messages.append(warning_text)
+
+                    try:
+                        created_pairs.append(
+                            build_benchmark_pair(
+                                target_symbol,
+                                target_id,
+                                disease_name,
+                                disease_id,
+                                cutoff_date,
+                            )
+                        )
+                    except Exception as exc:
+                        st.error(f"Error creating BenchmarkPair for {label}: {exc}")
+
+            if created_pairs:
+                st.session_state["benchmark_pairs"] = created_pairs
+                st.success(f"Created {len(created_pairs)} BenchmarkPair object(s).")
+                with st.expander("View generated BenchmarkPairs", expanded=False):
+                    st.json([pair.model_dump(mode="json") for pair in created_pairs])
+
+            for msg in unresolved_messages:
+                st.warning(msg)
+
+    benchmark_pairs = st.session_state.get("benchmark_pairs", [])
+    if benchmark_pairs:
+        active_pair_labels = [f"{pair.target_symbol} | {pair.disease_name}" for pair in benchmark_pairs]
+        active_pair_lookup = dict(zip(active_pair_labels, benchmark_pairs))
+        selected_active_pair_label = st.selectbox(
+            "Active benchmark pair for dossier and retrospective views",
+            options=active_pair_labels,
+            index=0,
+        )
+        active_pair = active_pair_lookup[selected_active_pair_label]
+        target_symbol = active_pair.target_symbol
+        target_id = active_pair.target_id
+        disease_name = active_pair.disease_name
+        disease_id = active_pair.disease_id
+    else:
+        # Default pair keeps the rest of the page usable before first submit.
+        target_symbol = "PCSK9"
+        disease_name = "hypercholesterolemia"
+        target_id, _ = resolve_target_id(target_symbol)
+        disease_id, _ = resolve_disease_id(disease_name)
 
     st.divider()
 
