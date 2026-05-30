@@ -295,8 +295,8 @@ def findings_to_retrospective_checks(
 
 
 def main() -> None:
-    st.set_page_config(page_title="GreenLight BenchmarkPair Builder", page_icon="🧬")
-    st.title("GreenLight BenchmarkPair Mock Interface")
+    st.set_page_config(page_title="GreenLight", page_icon="🧬")
+    st.title("GreenLight")
 
     st.markdown(
         "Enter only a target symbol and a disease name. IDs are resolved behind the scenes and shown in grey. "
@@ -335,7 +335,7 @@ def main() -> None:
         use_2010_cutoff = st.checkbox("Cutoff at 2010 (hide future data after 2010)", value=True)
         cutoff_date = date(2010, 1, 1) if use_2010_cutoff else date.today()
 
-        submitted = st.form_submit_button("Create BenchmarkPair")
+        submitted = st.form_submit_button("Check Theory for Viability")
 
     if submitted:
         if target_id == "unknown" or disease_id == "unknown":
@@ -353,16 +353,16 @@ def main() -> None:
                 disease_name,
                 disease_id,
             )
-            st.success("BenchmarkPair created successfully")
-            st.write("### Generated BenchmarkPair")
-            st.write(f"**pair_id:** `{benchmark_pair.pair_id}`")
-            st.json(benchmark_pair.model_dump(mode="json"))
+            # st.success("BenchmarkPair created successfully")
+            # st.write("### Generated BenchmarkPair")
+            # st.write(f"**pair_id:** `{benchmark_pair.pair_id}`")
+            # st.json(benchmark_pair.model_dump(mode="json"))
 
-            st.markdown(
-                "---\n"
-                "The hidden benchmark fields are populated automatically for this mock interface. "
-                "You can extend this app later to collect labels and validation metadata."
-            )
+            # st.markdown(
+            #     "---\n"
+            #     "The hidden benchmark fields are populated automatically for this mock interface. "
+            #     "You can extend this app later to collect labels and validation metadata."
+            # )
         except Exception as exc:
             st.error(f"Error creating BenchmarkPair: {exc}")
 
@@ -429,14 +429,14 @@ def main() -> None:
                     retro_result.get("sources", []),
                 )
                 aligned_count = sum(1 for row in checks if row["Result"] == "Correct")
-                evaluable_count = sum(1 for row in checks if row["Result"] in {"Correct", "Incorrect"})
+                total_findings_count = len(checks)
 
                 col1, col2, col3 = st.columns(3)
                 col1.metric("2010 Recommendation", recommendation_2010)
                 col2.metric(
                     "Findings Aligned with 2010 Call",
-                    f"{aligned_count}/{evaluable_count}" if evaluable_count else "0/0",
-                    help="Counts findings where modern evidence explicitly supports or refutes the 2010 call. Mixed/Needs Curation findings are excluded.",
+                    f"{aligned_count}/{total_findings_count}" if total_findings_count else "0/0",
+                    help="Includes all findings in the denominator, including mixed/needs-curation findings.",
                 )
                 col3.metric("Retrospective Verdict", retro_result.get("overall_verdict", "Mixed / Inconclusive"))
 
