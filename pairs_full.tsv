@@ -1,0 +1,67 @@
+# GreenLight sweep input — FULL (40 pairs, ~$2 OpenAI).
+# Format: target<TAB>disease<TAB>cutoff_iso       lines beginning with '#' are ignored.
+#
+# PLACEHOLDERS — Person C's benchmark replaces these (BenchmarkPair -> TSV by exporting
+# target_symbol, disease_name, cutoff_date.isoformat() per row). Pre-cutoff is the only
+# hard rule per the no-future-leak rule; labels live on C's side.
+#
+# Mix: validated post-cutoff "winners" + plausible "stragglers" across organ systems.
+# Cutoff 2018 keeps ~5 years of recent validation data on C's side.
+
+# --- Lipids / cardiovascular ---
+PCSK9	hypercholesterolemia	2018-01-01
+HMGCR	hypercholesterolemia	2018-01-01
+LDLR	hypercholesterolemia	2018-01-01
+APOB	hypercholesterolemia	2018-01-01
+ANGPTL3	hypercholesterolemia	2018-01-01
+LPA	atherosclerosis	2018-01-01
+
+# --- Inflammation / autoimmune ---
+IL23A	psoriasis	2018-01-01
+IL17A	psoriasis	2018-01-01
+TNF	rheumatoid arthritis	2018-01-01
+JAK1	rheumatoid arthritis	2018-01-01
+JAK2	rheumatoid arthritis	2018-01-01
+IL6R	rheumatoid arthritis	2018-01-01
+IL13	atopic dermatitis	2018-01-01
+
+# --- Metabolism / endocrine ---
+GLP1R	type 2 diabetes mellitus	2018-01-01
+SGLT2	type 2 diabetes mellitus	2018-01-01
+DPP4	type 2 diabetes mellitus	2018-01-01
+GCG	type 2 diabetes mellitus	2018-01-01
+
+# --- Bone / muscle ---
+SOST	osteoporosis	2018-01-01
+RANKL	osteoporosis	2018-01-01
+
+# --- Oncology (high-stakes for the demo) ---
+BRCA1	breast carcinoma	2018-01-01
+BRCA2	breast carcinoma	2018-01-01
+HER2	breast carcinoma	2018-01-01
+EGFR	non-small cell lung carcinoma	2018-01-01
+ALK	non-small cell lung carcinoma	2018-01-01
+KRAS	non-small cell lung carcinoma	2018-01-01
+BRAF	melanoma	2018-01-01
+PD1	melanoma	2018-01-01
+PDCD1	melanoma	2018-01-01
+CD19	acute lymphoblastic leukemia	2018-01-01
+
+# --- Neurodegeneration ---
+APP	Alzheimer disease	2018-01-01
+APOE	Alzheimer disease	2018-01-01
+LRRK2	Parkinson disease	2018-01-01
+HTT	Huntington disease	2018-01-01
+
+# --- Respiratory / fibrosis ---
+IL5	asthma	2018-01-01
+TSLP	asthma	2018-01-01
+
+# --- Rare / monogenic ---
+DMD	Duchenne muscular dystrophy	2018-01-01
+SMN1	spinal muscular atrophy	2018-01-01
+CFTR	cystic fibrosis	2018-01-01
+
+# --- Negative controls (genes weakly linked, should rank low) ---
+GAPDH	hypercholesterolemia	2018-01-01
+ACTB	type 2 diabetes mellitus	2018-01-01

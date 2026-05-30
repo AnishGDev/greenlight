@@ -1,0 +1,6 @@
+# GreenLight sweep input — SMALL (3 pairs, ~$0.10 OpenAI).
+# Format: target<TAB>disease<TAB>cutoff_iso       lines beginning with '#' are ignored.
+# Smoke-test the Modal fan-out end to end.
+PCSK9	hypercholesterolemia	2020-01-01
+HMGCR	hypercholesterolemia	2020-01-01
+LDLR	hypercholesterolemia	2020-01-01

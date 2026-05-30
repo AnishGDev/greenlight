@@ -1,0 +1,14 @@
+# GreenLight sweep input — MEDIUM (10 pairs, ~$0.50 OpenAI).
+# Format: target<TAB>disease<TAB>cutoff_iso       lines beginning with '#' are ignored.
+# Mixed targets/diseases across organ systems for a broader throughput signal.
+# Placeholders only — Person C's benchmark replaces these with labelled pairs.
+PCSK9	hypercholesterolemia	2020-01-01
+HMGCR	hypercholesterolemia	2020-01-01
+LDLR	hypercholesterolemia	2020-01-01
+APOB	hypercholesterolemia	2020-01-01
+SOST	osteoporosis	2018-01-01
+IL23A	psoriasis	2018-01-01
+IL17A	psoriasis	2018-01-01
+GLP1R	type 2 diabetes mellitus	2018-01-01
+BRCA1	breast carcinoma	2018-01-01
+EGFR	non-small cell lung carcinoma	2018-01-01
