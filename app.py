@@ -296,11 +296,104 @@ def findings_to_retrospective_checks(
 
 def main() -> None:
     st.set_page_config(page_title="GreenLight", page_icon="🧬")
-    st.title("GreenLight")
+    st.markdown(
+        """
+        <style>
+        .stApp {
+            background:
+                radial-gradient(circle at 82% 10%, rgba(16, 185, 129, 0.16), transparent 40%),
+                radial-gradient(circle at 12% 8%, rgba(34, 197, 94, 0.12), transparent 36%),
+                #08110f;
+            color: #d9efe8;
+        }
+
+        h1, h2, h3, h4, label {
+            color: #e6fff6 !important;
+        }
+
+        p, .stCaption, .stMarkdown {
+            color: #b9d6cc;
+        }
+
+        [data-testid="stForm"],
+        [data-testid="stMetric"],
+        [data-testid="stExpander"] {
+            background: linear-gradient(160deg, rgba(15, 23, 20, 0.9), rgba(10, 19, 16, 0.9));
+            border: 1px solid rgba(52, 211, 153, 0.22);
+            padding: 10px;
+            border-radius: 14px;
+        }
+
+        [data-testid="stTextInputRootElement"] input {
+            background: rgba(4, 10, 8, 0.85) !important;
+            color: #d7f9ec !important;
+            border: 1px solid rgba(74, 222, 128, 0.35) !important;
+        }
+
+        .stButton > button {
+            background: linear-gradient(135deg, #16a34a, #059669) !important;
+            color: #ecfdf5 !important;
+            border: 1px solid rgba(167, 243, 208, 0.35) !important;
+            border-radius: 10px !important;
+            font-weight: 600;
+        }
+
+        .stButton > button:hover {
+            filter: brightness(1.08);
+            box-shadow: 0 0 0 2px rgba(52, 211, 153, 0.25);
+        }
+
+        .gl-hero {
+            border: 1px solid rgba(52, 211, 153, 0.28);
+            border-radius: 16px;
+            background: linear-gradient(125deg, rgba(6, 14, 11, 0.95), rgba(8, 24, 18, 0.95));
+            padding: 18px 20px;
+            margin-bottom: 14px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.28);
+        }
+
+        .gl-kicker {
+            display: inline-block;
+            font-size: 12px;
+            color: #86efac;
+            border: 1px solid rgba(134, 239, 172, 0.35);
+            border-radius: 999px;
+            padding: 4px 10px;
+            margin-bottom: 8px;
+            background: rgba(22, 163, 74, 0.12);
+        }
+
+        .gl-title {
+            font-size: 38px;
+            line-height: 1.05;
+            font-weight: 700;
+            margin: 0 0 8px 0;
+            color: #dcfce7;
+        }
+
+        .gl-subtitle {
+            margin: 0;
+            color: #b8dcd0;
+            line-height: 1.55;
+            max-width: 900px;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
 
     st.markdown(
-        "Enter only a target symbol and a disease name. IDs are resolved behind the scenes and shown in grey. "
-        "Use the cutoff switch to choose a 2010 retrospective cutoff or include all data up to today."
+        """
+        <section class="gl-hero">
+          <div class="gl-kicker">Medical Research Validation Workspace</div>
+          <h1 class="gl-title">GreenLight</h1>
+          <p class="gl-subtitle">
+            Build a target-disease benchmark pair, run retrospective evidence validation, and inspect finding-level
+            interpretation with direct paper traceability from a single interface.
+          </p>
+        </section>
+        """,
+        unsafe_allow_html=True,
     )
 
     with st.form("benchmark_pair_form"):

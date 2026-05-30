@@ -219,9 +219,46 @@ def fetch_europe_pmc_post_cutoff(
                 "source_id": source_id,
                 "journal": item.get("journalTitle") or "Unknown journal",
                 "url": f"https://europepmc.org/article/MED/{pmid}" if pmid else "",
+                "abstract": item.get("abstractText") or "",
             }
         )
     return publications
+
+
+def fetch_europe_pmc_abstract_by_pmid(pmid: str) -> str:
+    response = httpx.get(
+        EUROPE_PMC_SEARCH_URL,
+        params={
+            "query": f"EXT_ID:{pmid} AND SRC:MED",
+            "format": "json",
+            "resultType": "core",
+            "pageSize": 1,
+        },
+        timeout=TIMEOUT,
+    )
+    response.raise_for_status()
+    results = response.json().get("resultList", {}).get("result", []) or []
+    if not results:
+        return ""
+    return str(results[0].get("abstractText") or "")
+
+
+def enrich_ot_rows_with_abstracts(ot_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Attach abstracts to Open Targets rows where PMID is available."""
+    enriched_rows: list[dict[str, Any]] = []
+    for row in ot_rows:
+        row_copy = dict(row)
+        pmids = row_copy.get("literature") or []
+        pmid = str(pmids[0]).strip() if pmids else ""
+        abstract_text = ""
+        if pmid:
+            try:
+                abstract_text = fetch_europe_pmc_abstract_by_pmid(pmid)
+            except Exception:
+                abstract_text = ""
+        row_copy["abstract"] = abstract_text
+        enriched_rows.append(row_copy)
+    return enriched_rows
 
 
 def _to_evidence_lines(
@@ -240,10 +277,13 @@ def _to_evidence_lines(
         datatype = row.get("datatypeId") or "unknown"
         datasource = row.get("datasourceId") or "unknown"
         disease_from_source = row.get("diseaseFromSource") or ""
+        abstract_text = str(row.get("abstract") or "")
+        abstract_snippet = " ".join(abstract_text.split())[:900]
 
         line = (
             f"OpenTargets | year={year} | datatype={datatype} | datasource={datasource} "
-            f"| score={score} | source={source_id} | text={disease_from_source}"
+            f"| score={score} | source={source_id} | text={disease_from_source} "
+            f"| abstract={abstract_snippet}"
         )
         lines.append(line)
         sources.append(
@@ -252,13 +292,16 @@ def _to_evidence_lines(
                 "source_id": source_id,
                 "year": str(year),
                 "detail": f"{datatype} via {datasource}",
+                "abstract": abstract_snippet,
             }
         )
 
     for item in epmc_rows[:12]:
+        abstract_text = str(item.get("abstract") or "")
+        abstract_snippet = " ".join(abstract_text.split())[:900]
         line = (
             f"EuropePMC | year={item['year']} | source={item['source_id']} "
-            f"| journal={item['journal']} | title={item['title']}"
+            f"| journal={item['journal']} | title={item['title']} | abstract={abstract_snippet}"
         )
         lines.append(line)
         sources.append(
@@ -268,6 +311,7 @@ def _to_evidence_lines(
                 "year": item["year"],
                 "detail": item["title"],
                 "url": item.get("url", ""),
+                "abstract": abstract_snippet,
             }
         )
 
@@ -437,6 +481,9 @@ def run_retrospective_validation(
         ot_rows = fetch_ot_post_cutoff_evidence(target_id, disease_id, start_year=start_year)
     except Exception as exc:
         warnings.append(f"Open Targets query failed: {exc}")
+
+    if ot_rows:
+        ot_rows = enrich_ot_rows_with_abstracts(ot_rows)
 
     try:
         epmc_rows = fetch_europe_pmc_post_cutoff(query_target, query_disease, start_year=start_year)
