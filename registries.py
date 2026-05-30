@@ -16,7 +16,7 @@ ENSEMBL_SPECIES = "homo_sapiens"
 ENSEMBL_LOOKUP_URL = "https://rest.ensembl.org/lookup/symbol/{species}/{symbol}"
 
 # OLS (Ontology Lookup Service) API endpoints
-OLS_SEARCH_URL = "https://www.ebi.ac.uk/ols/api/search"
+OLS_SEARCH_URL = "https://www.ebi.ac.uk/ols4/api/search"
 OLS_ONTOLOGIES = "efo,mondo"  # Search across EFO and MONDO
 
 HEADERS = {"Content-Type": "application/json", "Accept": "application/json"}
@@ -117,6 +117,8 @@ def resolve_disease_id(disease_name: str) -> tuple[str, list[str]]:
         for result in results:
             label = result.get("label", "").lower()
             short_form = result.get("short_form", "")
+            if not short_form[0:5].lower() in ("efo__", "mondo"):
+                continue  # Skip non-disease results
             
             # Calculate relevance score
             score = 0

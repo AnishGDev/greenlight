@@ -146,7 +146,7 @@ def display_dossier_summary(dossier: Dossier, key_suffix: str = "") -> None:
             tier_data = []
             for tier_type, count in sorted(dossier.tier_breakdown.items()):
                 tier_data.append({"Evidence Type": tier_type, "Count": count})
-            st.dataframe(tier_data, use_container_width=True, hide_index=True)
+            st.dataframe(tier_data, width='stretch', hide_index=True)
         else:
             st.caption("(no tier breakdown available)")
         
