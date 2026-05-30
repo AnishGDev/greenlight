@@ -180,12 +180,12 @@ class BenchmarkPair(BaseModel):
     target_id: str                                # Ensembl
     disease_name: str
     disease_id: str                               # EFO / MONDO
-    cutoff_date: date                             # the "hide the future" line for this pair
+    cutoff_date: Optional[date] = None             # the "hide the future" line for this pair
 
-    validated_after_cutoff: bool                  # GROUND TRUTH label
-    validation_evidence: Optional[str] = None     # what validated it (OT score / NCT / approval)
-    is_negative_control: bool = False             # known dud, needed for AUPRC negatives
-    split: Split = Split.held_out
+    validated_after_cutoff: Optional[bool] = None  # GROUND TRUTH label
+    validation_evidence: Optional[str] = None      # what validated it (OT score / NCT / approval)
+    is_negative_control: Optional[bool] = None     # known dud, needed for AUPRC negatives
+    split: Optional[Split] = None
     notes: Optional[str] = None
 
 
