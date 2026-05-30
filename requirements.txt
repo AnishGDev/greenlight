@@ -1,0 +1,27 @@
+# GreenLight — shared requirements (one venv for A, B, C)
+
+# --- shared (everyone) ---
+pydantic>=2.0
+python-dotenv
+openai
+
+# --- Person A: data & evidence engine ---
+httpx
+tenacity
+modal
+chembl_webresource_client
+# optional (Step 3 retrieval only; skip if you use Europe PMC relevance ranking):
+# faiss-cpu
+
+# --- Person B: verifier & synthesizer ---
+scikit-learn
+# optional local NLI model (~GB; only if NOT using the OpenAI entailment path):
+# torch
+# transformers
+
+# --- Person C: benchmark, metrics, demo ---
+pandas
+numpy
+matplotlib
+plotly
+streamlit
