@@ -330,7 +330,7 @@ def _on_heatmap_select() -> None:
 
 
 def main() -> None:
-    st.set_page_config(page_title="GreenLight", page_icon="🧬")
+    st.set_page_config(page_title="GREENLIGHT", page_icon="🧬")
     st.markdown(
         """
         <style>
@@ -444,7 +444,7 @@ def main() -> None:
         """
         <section class="gl-hero">
           <div class="gl-kicker">Medical Research Validation Workspace</div>
-          <h1 class="gl-title">GreenLight</h1>
+          <h1 class="gl-title">GREENLIGHT</h1>
           <p class="gl-subtitle">
             Build a target-disease benchmark pair, run retrospective evidence validation, and inspect finding-level
             interpretation with direct paper traceability from a single interface.
@@ -467,16 +467,15 @@ def main() -> None:
             options=target_options,
             default=["PCSK9"],
             help="Select one or more targets.",
+            accept_new_options=True
         )
         selected_diseases = st.multiselect(
             "Diseases",
             options=disease_options,
             default=["hypercholesterolemia"],
             help="Select one or more diseases.",
+            accept_new_options=True
         )
-
-        candidate_pair_count = len(selected_targets) * len(selected_diseases)
-        st.caption(f"This will create {candidate_pair_count} BenchmarkPair object(s).")
 
         use_2010_cutoff = st.checkbox("Cutoff at 2010 (hide future data after 2010)", value=True)
         cutoff_date = date(2010, 1, 1) if use_2010_cutoff else date.today()
