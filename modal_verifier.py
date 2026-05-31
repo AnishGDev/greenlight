@@ -26,6 +26,7 @@ image = (
         "pydantic>=2",
         "tenacity>=8",
     )
+    .add_local_python_source("schemas")
 )
 
 

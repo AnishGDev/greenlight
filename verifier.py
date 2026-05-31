@@ -193,8 +193,32 @@ def _dedupe_verified_for_scoring(verified: list[VerifiedClaim]) -> list[Verified
   return out
 
 
+def _split_atomic_claims(claim: str) -> list[str]:
+  """Small, conservative B1 pass: split obvious compounds without rewriting science."""
+  pieces = [claim]
+  if ";" in claim:
+    pieces = [p.strip() for p in claim.split(";")]
+  elif " and " in claim and len(claim) > 140:
+    pieces = [p.strip() for p in claim.split(" and ")]
+  return [p for p in pieces if len(p) >= 12]
+
+
+def _normalize_evidence_items(items: Iterable[EvidenceItem]) -> list[EvidenceItem]:
+  """Normalize/dedupe claims while preserving source linkage and passages."""
+  out: list[EvidenceItem] = []
+  seen: set[tuple[str, str, str]] = set()
+  for item in items:
+    for claim in _split_atomic_claims(item.claim):
+      key = (_claim_key(claim), item.source_id, (item.source_text or "")[:120])
+      if key in seen:
+        continue
+      seen.add(key)
+      out.append(item.model_copy(update={"claim": claim}))
+  return out
+
+
 def _score_viability(verified: list[VerifiedClaim]) -> float:
-  """Raw viability score using supported evidence minus bounded quality/negative penalties."""
+  """Raw viability score using absolute tier-weighted support minus penalties."""
   scored = _dedupe_verified_for_scoring(verified)
   positives = [
     v for v in scored
@@ -203,9 +227,25 @@ def _score_viability(verified: list[VerifiedClaim]) -> float:
   if not positives:
     base = 0.0
   else:
-    num = sum(v.tier_weight * max(0.0, min(1.0, v.verdict_confidence)) for v in positives)
-    den = sum(v.tier_weight for v in positives) or 1.0
-    base = num / den
+    strong_support = sum(
+      v.tier_weight * max(0.0, min(1.0, v.verdict_confidence))
+      for v in positives
+      if v.tier_weight >= 0.9
+    )
+    medium_support = sum(
+      v.tier_weight * max(0.0, min(1.0, v.verdict_confidence))
+      for v in positives
+      if 0.4 <= v.tier_weight < 0.9
+    )
+    weak_support = sum(
+      v.tier_weight * max(0.0, min(1.0, v.verdict_confidence))
+      for v in positives
+      if v.tier_weight < 0.4
+    )
+    support = strong_support + min(0.8, medium_support) + min(0.45, weak_support)
+    base = support / (support + 0.55) if support > 0 else 0.0
+    if strong_support == 0 and medium_support == 0:
+      base = min(base, 0.49)
 
   unsupported = [v for v in scored if v.verdict == Verdict.unsupported and not v.is_negative_evidence]
   contradicted = [v for v in scored if v.verdict == Verdict.contradicted and not v.is_negative_evidence]
@@ -341,7 +381,11 @@ def _judge_entailment_local(source_text: str, claim: str) -> tuple[Verdict, floa
         raise
     return data
 
-  data = _call()
+  try:
+    data = _call()
+  except Exception as e:
+    reason = f"OpenAI entailment unavailable; marked uncertain instead of failing: {type(e).__name__}."
+    return Verdict.uncertain, 0.0, f"openai:{model}", reason, ""
   vmap = {
     "supported": Verdict.supported,
     "contradicted": Verdict.contradicted,
@@ -359,6 +403,36 @@ def _judge_entailment_local(source_text: str, claim: str) -> tuple[Verdict, floa
   return verdict, conf, f"openai:{model}", reason, supporting_span
 
 
+def _judge_entailment_fixture(source_text: str, claim: str) -> tuple[Verdict, float, str, str, str]:
+  """Deterministic demo judge for offline/stage runs."""
+  source = " ".join((source_text or "").lower().split())
+  claim_l = " ".join((claim or "").lower().split())
+  if not source:
+    return Verdict.unsupported, 0.0, "fixture:deterministic", "No source_text was provided.", ""
+
+  overclaim_markers = ["cures", "cure ", "all patients", "guaranteed", "eliminates"]
+  modest_source_markers = ["reduced", "associated", "small cohort", "may", "over 12 weeks", "under investigation"]
+  if any(m in claim_l for m in overclaim_markers) and any(m in source for m in modest_source_markers):
+    return (
+      Verdict.unsupported,
+      0.92,
+      "fixture:deterministic",
+      "The passage describes limited or qualified evidence, not the absolute claim.",
+      "",
+    )
+
+  negative_terms = ["adverse", "safety", "failure", "failed", "toxicity", "not established", "concern"]
+  if "cautionary" in claim_l or "negative evidence" in claim_l:
+    if any(t in source for t in negative_terms):
+      return Verdict.supported, 0.83, "fixture:deterministic", "The passage contains a cautionary or safety signal.", source_text[:220]
+    return Verdict.unsupported, 0.65, "fixture:deterministic", "The passage does not clearly contain negative evidence.", ""
+
+  overlap = _similarity(claim_l, source)
+  if overlap >= 0.18 or any(t in source for t in _tokens(claim_l)):
+    return Verdict.supported, 0.86, "fixture:deterministic", "The source text overlaps substantially with the claim.", source_text[:220]
+  return Verdict.unsupported, 0.72, "fixture:deterministic", "The source text does not clearly entail the claim.", ""
+
+
 def _verify_claim_local(item: EvidenceItem) -> tuple[VerifiedClaim, str, str, str]:
   if not item.source_text:
     verdict, conf = Verdict.unsupported, 0.0
@@ -370,6 +444,24 @@ def _verify_claim_local(item: EvidenceItem) -> tuple[VerifiedClaim, str, str, st
     verdict, conf, model_used = judged[:3]
     reason = judged[3] if len(judged) > 3 else ""
     supporting_span = judged[4] if len(judged) > 4 else ""
+  v = VerifiedClaim(
+    claim=item.claim,
+    evidence_type=item.evidence_type,
+    verdict=verdict,
+    verdict_confidence=conf,
+    tier_weight=TIER_WEIGHTS[item.evidence_type],
+    is_negative_evidence=False,
+    source_db=item.source_db,
+    source_id=item.source_id,
+    source_url=item.source_url,
+    source_text=item.source_text or "",
+    publication_date=item.publication_date,
+  )
+  return v, model_used, reason, supporting_span
+
+
+def _verify_claim_fixture(item: EvidenceItem) -> tuple[VerifiedClaim, str, str, str]:
+  verdict, conf, model_used, reason, supporting_span = _judge_entailment_fixture(item.source_text, item.claim)
   v = VerifiedClaim(
     claim=item.claim,
     evidence_type=item.evidence_type,
@@ -429,6 +521,19 @@ def _verify_claims_local(items: Iterable[EvidenceItem]) -> tuple[list[VerifiedCl
   return verified, (model_used or "openai:unknown")
 
 
+def _verify_claims_fixture(items: Iterable[EvidenceItem]) -> tuple[list[VerifiedClaim], str]:
+  items = list(items)
+  verified: list[VerifiedClaim] = []
+  for i, it in enumerate(items, start=1):
+    print(f"[fixture] verifying claim {i}/{len(items)}: {it.claim[:120]}", flush=True)
+    v, mdl, reason, supporting_span = _verify_claim_fixture(it)
+    print(f"[fixture] -> {v.verdict.value} conf={v.verdict_confidence:.2f} tier={v.tier_weight}", flush=True)
+    _append_audit_record(i, v, mdl, reason, supporting_span)
+    verified.append(v)
+  print(f"[fixture] verified {len(verified)} claims", flush=True)
+  return verified, "fixture:deterministic"
+
+
 def _call_search(search: Callable[[str, object], list[EvidenceItem]], query: str,
                  cutoff_date: object, limit: int) -> list[EvidenceItem]:
   """Call A.search while tolerating either 2-arg or 3-arg signatures."""
@@ -443,6 +548,8 @@ def _verify_items_by_mode(items: list[EvidenceItem], mode: str) -> list[Verified
     return []
   if mode == "modal":
     out, _ = _verify_claims_modal(items)
+  elif mode == "fixture":
+    out, _ = _verify_claims_fixture(items)
   else:
     out, _ = _verify_claims_local(items)
   return out
@@ -604,65 +711,53 @@ def _contradiction_hunt(pkg: EvidencePackage, mode: str, search: Callable[[str, 
   return negs
 
 
-def verify_and_synthesize(pkg: EvidencePackage, *, mode: str = "modal",
-              search: Callable[[str, object], list[EvidenceItem]] | None = None) -> Dossier:
-  """
-  Verifies each claim in the EvidencePackage (OpenAI entailment) and returns a Dossier.
-  mode: 'modal' (default) spawns per-claim workers on Modal; 'local' runs in-process.
-  search: optional A.search(query, cutoff_date) for contradiction/negative-evidence hunt.
-  """
-  t0 = time.time()
-  _reset_audit(pkg.pair_id)
+def _empty_dossier(pkg: EvidencePackage, t0: float) -> Dossier:
+  empty = Dossier(
+    pair_id=pkg.pair_id,
+    target_symbol=pkg.target_symbol,
+    target_id=pkg.target_id,
+    disease_name=pkg.disease_name,
+    disease_id=pkg.disease_id,
+    cutoff_date=pkg.cutoff_date,
+    verified_claims=[],
+    viability_score=0.0,
+    recommendation=_map_recommendation(0.0),
+    rationale="No verifiable evidence within cutoff.",
+  )
+  empty.supported_count = 0
+  empty.contradicted_count = 0
+  empty.unsupported_count = 0
+  empty.tier_breakdown = {}
+  empty.flags = ["insufficient_evidence"]
+  empty.model_used = None
+  empty.runtime_seconds = round(time.time() - t0, 3)
+  return empty
 
-  items = list(pkg.evidence_items)
-  print(f"[verify] starting verification for pair={pkg.pair_id} target={pkg.target_symbol} disease={pkg.disease_name} items={len(items)} mode={mode}", flush=True)
-  if not items:
-    # Empty dossier skeleton
-    empty = Dossier(
-      pair_id=pkg.pair_id,
-      target_symbol=pkg.target_symbol,
-      target_id=pkg.target_id,
-      disease_name=pkg.disease_name,
-      disease_id=pkg.disease_id,
-      cutoff_date=pkg.cutoff_date,
-      verified_claims=[],
-      viability_score=0.0,
-      recommendation=_map_recommendation(0.0),
-      rationale="No verifiable evidence within cutoff.",
-    )
-    empty.supported_count = 0
-    empty.contradicted_count = 0
-    empty.unsupported_count = 0
-    empty.tier_breakdown = {}
-    empty.flags = ["insufficient_evidence"]
-    empty.model_used = None
-    empty.runtime_seconds = round(time.time() - t0, 3)
-    return empty
 
-  # Load env for local secret access
-  load_dotenv()
-
-  if mode == "modal":
-    verified, model_used = _verify_claims_modal(items)
-  elif mode == "local":
-    verified, model_used = _verify_claims_local(items)
-  else:
-    raise ValueError("mode must be 'modal' or 'local'")
-
-  # B3: add independent literature checks for high-tier supported claims if A.search is available.
-  if search is not None:
-    verified.extend(_cross_source_corroboration(pkg, verified, mode, search))
-
-  # B4: add active negative/cautionary evidence if A.search is available.
-  verified.extend(_contradiction_hunt(pkg, mode, search))
-
+def _dossier_from_verified(
+  pkg: EvidencePackage,
+  verified: list[VerifiedClaim],
+  model_used: str | None,
+  t0: float,
+  *,
+  search_used: bool = False,
+) -> Dossier:
   score = _score_viability(verified)
   rec = _map_recommendation(score)
   rationale = _synthesize_rationale(verified)
   scount, ccount, ucount, tbreak, flags = _finalize_stats(verified)
+  if model_used == "fixture:deterministic":
+    flags.append("demo_fixture_mode")
+  if search_used:
+    cross_checked = sum(
+      1 for v in verified
+      if v.source_db.value == "europe_pmc" and v.verdict in {Verdict.supported, Verdict.contradicted}
+    )
+    if cross_checked:
+      flags.append(f"independent_checks:{cross_checked}")
   flags = sorted(set(flags + _detect_internal_consistency(verified)))
 
-  dossier = Dossier(
+  return Dossier(
     pair_id=pkg.pair_id,
     target_symbol=pkg.target_symbol,
     target_id=pkg.target_id,
@@ -681,14 +776,100 @@ def verify_and_synthesize(pkg: EvidencePackage, *, mode: str = "modal",
     model_used=model_used,
     runtime_seconds=round(time.time() - t0, 3),
   )
-  return dossier
+
+
+def verify_and_synthesize(pkg: EvidencePackage, *, mode: str = "modal",
+              search: Callable[[str, object], list[EvidenceItem]] | None = None) -> Dossier:
+  """
+  Verifies each claim in the EvidencePackage (OpenAI entailment) and returns a Dossier.
+  mode: 'modal' (default) spawns per-claim workers on Modal; 'local' runs in-process.
+  search: optional A.search(query, cutoff_date) for contradiction/negative-evidence hunt.
+  """
+  t0 = time.time()
+  _reset_audit(pkg.pair_id)
+
+  items = _normalize_evidence_items(pkg.evidence_items)
+  print(f"[verify] starting verification for pair={pkg.pair_id} target={pkg.target_symbol} disease={pkg.disease_name} items={len(items)} mode={mode}", flush=True)
+  if not items:
+    return _empty_dossier(pkg, t0)
+
+  # Load env for local secret access
+  load_dotenv()
+
+  if mode == "modal":
+    verified, model_used = _verify_claims_modal(items)
+  elif mode == "local":
+    verified, model_used = _verify_claims_local(items)
+  elif mode == "fixture":
+    verified, model_used = _verify_claims_fixture(items)
+  else:
+    raise ValueError("mode must be 'modal', 'local', or 'fixture'")
+
+  # B3: add independent literature checks for high-tier supported claims if A.search is available.
+  if search is not None:
+    verified.extend(_cross_source_corroboration(pkg, verified, mode, search))
+
+  # B4: add active negative/cautionary evidence if A.search is available.
+  verified.extend(_contradiction_hunt(pkg, mode, search))
+
+  return _dossier_from_verified(pkg, verified, model_used, t0, search_used=search is not None)
+
+
+def verify_and_synthesize_batch(
+  packages: list[EvidencePackage],
+  *,
+  mode: str = "modal",
+) -> list[Dossier]:
+  """Batch verifier. Modal mode opens one app run and spawns all claim jobs together."""
+  if mode != "modal":
+    return [verify_and_synthesize(pkg, mode=mode, search=None) for pkg in packages]
+
+  from modal_verifier import app as modal_app, verify_claim_cpu  # type: ignore
+
+  t0_by_pair = [time.time() for _ in packages]
+  normalized = [_normalize_evidence_items(pkg.evidence_items) for pkg in packages]
+  grouped: list[list[VerifiedClaim]] = [[] for _ in packages]
+  model_used = "openai:unknown"
+  job_refs: list[tuple[int, int, Any]] = []
+
+  total_claims = sum(len(items) for items in normalized)
+  print(f"[modal-batch] spawning {total_claims} claim jobs across {len(packages)} pair(s)...", flush=True)
+  with modal_app.run():
+    for pkg_idx, items in enumerate(normalized):
+      for claim_idx, item in enumerate(items, start=1):
+        job_refs.append((pkg_idx, claim_idx, verify_claim_cpu.spawn(item.model_dump(mode="json"))))
+
+    for done_idx, (pkg_idx, _claim_idx, job) in enumerate(job_refs, start=1):
+      print(f"[modal-batch] waiting for job {done_idx}/{len(job_refs)}...", flush=True)
+      out = job.get()
+      mdl = out.pop("_model_used", None)
+      out.pop("_audit_reason", "")
+      out.pop("_audit_supporting_span", "")
+      if mdl and model_used == "openai:unknown":
+        model_used = mdl
+      v = VerifiedClaim.model_validate(out)
+      print(
+        f"[modal-batch] result {done_idx}/{len(job_refs)} pair={packages[pkg_idx].pair_id}: "
+        f"{v.verdict.value} conf={v.verdict_confidence:.2f} tier={v.tier_weight}",
+        flush=True,
+      )
+      grouped[pkg_idx].append(v)
+
+  dossiers: list[Dossier] = []
+  for idx, pkg in enumerate(packages):
+    if not normalized[idx]:
+      dossiers.append(_empty_dossier(pkg, t0_by_pair[idx]))
+    else:
+      dossiers.append(_dossier_from_verified(pkg, grouped[idx], model_used, t0_by_pair[idx]))
+  print(f"[modal-batch] collected dossiers for {len(dossiers)} pair(s)", flush=True)
+  return dossiers
 
 
 if __name__ == "__main__":
   ap = argparse.ArgumentParser()
   ap.add_argument("--in", dest="in_path", help="Path to EvidencePackage JSON")
   ap.add_argument("--out", dest="out_path", help="Path to write Dossier JSON", default=None)
-  ap.add_argument("--mode", choices=["local", "modal"], default="modal")
+  ap.add_argument("--mode", choices=["local", "modal", "fixture"], default="modal")
   ap.add_argument("--no-contradictions", action="store_true", help="Disable contradiction hunt")
   # Batch JSONL options
   ap.add_argument("--jsonl", dest="jsonl_path", help="Path to JSONL of EvidencePackage objects")

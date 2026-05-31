@@ -198,7 +198,14 @@ def resolve_ids(target: str, disease: str) -> tuple[str, str]:
 
 def fetch_ot_rows(ensembl_id: str, efo_id: str) -> list[dict]:
     data = _gql(_EVIDENCE, {"efoId": efo_id, "ensemblId": ensembl_id})
-    return data["disease"]["evidences"]["rows"]
+    disease = data.get("disease")
+    if not isinstance(disease, dict):
+        return []
+    evidences = disease.get("evidences")
+    if not isinstance(evidences, dict):
+        return []
+    rows = evidences.get("rows")
+    return rows if isinstance(rows, list) else []
 
 
 # --------------------------------------------------------------------------- #
@@ -400,14 +407,43 @@ def _literature_items_for_row(row: dict, target: str, disease: str,
     paper, fetched = _pick_pre_cutoff_paper(pmids, cutoff, errors)
     if not paper:
         return [], fetched
+    etype = OT_TYPE_MAP.get(row.get("datatypeId", ""), EvidenceType.correlational)
+
+    def fallback_item(reason: str) -> EvidenceItem:
+        title = (paper.get("title") or "").strip()
+        abstract = (paper.get("abstract") or "").strip()
+        claim = (
+            f"Pre-cutoff publication reports evidence relevant to {target} and {disease}: {title}"
+            if title else
+            f"Pre-cutoff publication reports evidence relevant to {target} and {disease}."
+        )
+        errors.append(f"epmc_fallback:{paper['pmid']}:{reason}")
+        return EvidenceItem(
+            claim=claim[:500],
+            evidence_type=etype,
+            source_db=SourceDB.europe_pmc,
+            source_id=f"PMID:{paper['pmid']}",
+            source_text=abstract[:2000],
+            source_url=paper["url"],
+            publication_date=paper["first_pub_date"],
+            retrieval_score=row.get("score"),
+            metadata={
+                "datasourceId": row.get("datasourceId"),
+                "datatypeId": row.get("datatypeId"),
+                "ot_id": row.get("id"),
+                "title": title,
+                "doi": paper.get("doi"),
+                "fallback_reason": reason,
+            },
+        )
+
     try:
         claims = extract_claims_llm(paper["abstract"], target, disease)
     except Exception as e:
         errors.append(f"llm:{paper['pmid']}:{type(e).__name__}")
-        return [], fetched
+        return [fallback_item(type(e).__name__)], fetched
     if not claims:
-        return [], fetched
-    etype = OT_TYPE_MAP.get(row.get("datatypeId", ""), EvidenceType.correlational)
+        return [fallback_item("no_claims")], fetched
     items = [
         EvidenceItem(
             claim=c["claim"],
@@ -444,6 +480,10 @@ def _prefilter_rows(rows: list[dict], cutoff: date) -> list[dict]:
         if y is None or date(y, 12, 31) <= cutoff:
             out.append(r)
     return out
+
+
+def _has_literature_pmids(row: dict) -> bool:
+    return any(str(pmid).strip() for pmid in (row.get("literature") or []))
 
 
 def _validate_canonical_disease_id(disease_id: str) -> None:
@@ -485,6 +525,46 @@ def _sort_items_for_handoff(items: list[EvidenceItem]) -> list[EvidenceItem]:
     )
 
 
+def _fallback_search_items(target: str, disease: str, cutoff: date,
+                           limit: int, errors: list[str]) -> tuple[list[EvidenceItem], int]:
+    """Last-resort dated literature search when OT rows produce no handoff items."""
+    try:
+        papers = europepmc_search(f"{target} {disease}", cutoff, page_size=limit)
+    except Exception as e:
+        errors.append(f"epmc_seed_search:{type(e).__name__}:{str(e)[:160]}")
+        return [], 0
+
+    items: list[EvidenceItem] = []
+    for paper in papers:
+        abstract = (paper.get("abstract") or "").strip()
+        pub = paper.get("first_pub_date")
+        if not abstract or pub is None or pub > cutoff:
+            continue
+        title = (paper.get("title") or "").strip()
+        items.append(EvidenceItem(
+            claim=(
+                f"Pre-cutoff literature reports evidence relevant to {target} and {disease}: {title}"
+                if title else
+                f"Pre-cutoff literature reports evidence relevant to {target} and {disease}."
+            )[:500],
+            evidence_type=EvidenceType.correlational,
+            source_db=SourceDB.europe_pmc,
+            source_id=f"PMID:{paper['pmid']}",
+            source_text=abstract[:2000],
+            source_url=paper["url"],
+            publication_date=pub,
+            retrieval_score=None,
+            metadata={
+                "title": title,
+                "doi": paper.get("doi"),
+                "fallback_reason": "ot_empty_seed_search",
+            },
+        ))
+    if items:
+        errors.append(f"epmc_seed_fallback:{len(items)}")
+    return items, len(papers)
+
+
 def build_evidence_package(target: str, disease: str, cutoff_date: date,
                            mock: bool = False,
                            enrich_budget: int = ENRICH_BUDGET_DEFAULT,
@@ -517,7 +597,7 @@ def build_evidence_package(target: str, disease: str, cutoff_date: date,
     # Prioritise rows with PMIDs and the highest OT score within the enrichment budget.
     candidate_rows_sorted = sorted(
         candidate_rows,
-        key=lambda r: (bool(r.get("literature")), r.get("score") or 0.0),
+        key=lambda r: (_has_literature_pmids(r), r.get("score") or 0.0),
         reverse=True,
     )
 
@@ -527,7 +607,7 @@ def build_evidence_package(target: str, disease: str, cutoff_date: date,
     for r in candidate_rows_sorted:
         attempted_enrichment = (not mock
                                 and attempts < enrich_budget
-                                and bool(r.get("literature")))
+                                and _has_literature_pmids(r))
         if attempted_enrichment:
             attempts += 1
             lit_items, np = _literature_items_for_row(
@@ -542,6 +622,12 @@ def build_evidence_package(target: str, disease: str, cutoff_date: date,
             raw_items.append(item)
 
     items = _sort_items_for_handoff(apply_cutoff(raw_items, cutoff_date, strict=True))
+    if not mock and not items:
+        fallback_items, fallback_papers = _fallback_search_items(
+            target, disease, cutoff_date, limit=min(max_items or 5, 10), errors=errors,
+        )
+        papers_processed += fallback_papers
+        items = _sort_items_for_handoff(apply_cutoff(fallback_items, cutoff_date, strict=True))
     if max_items is not None and max_items > 0 and len(items) > max_items:
         errors.append(f"truncated:{len(items)}->{max_items}")
         items = items[:max_items]

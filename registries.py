@@ -27,6 +27,10 @@ def normalize_term(value: str) -> str:
     return " ".join(value.strip().lower().split())
 
 
+def _is_allowed_disease_id(short_form: str) -> bool:
+    return short_form.startswith(("EFO_", "MONDO_"))
+
+
 @lru_cache(maxsize=128)
 def resolve_target_id(target_symbol: str) -> tuple[str, list[str]]:
     """
@@ -115,8 +119,8 @@ def resolve_disease_id(disease_name: str) -> tuple[str, list[str]]:
         for result in results:
             label = result.get("label", "").lower()
             short_form = result.get("short_form", "")
-            # if not short_form[0:3].lower() in "efo_" :#("efo__", "mondo"):
-            #     continue  # Skip non-disease results
+            if not _is_allowed_disease_id(short_form):
+                continue
             
             # Calculate relevance score
             score = 0
@@ -136,10 +140,12 @@ def resolve_disease_id(disease_name: str) -> tuple[str, list[str]]:
             # Fallback: just use the first result if no score matches
             best_match = results[0]
             disease_id = best_match.get("short_form")
+            if not disease_id or not _is_allowed_disease_id(disease_id):
+                return "unknown", []
             suggestions = [
                 result.get("label", result.get("short_form"))
                 for result in results[1:4]
-                if result.get("short_form")
+                if result.get("short_form") and _is_allowed_disease_id(result.get("short_form"))
             ]
             if disease_id:
                 return disease_id, suggestions
