@@ -115,8 +115,6 @@ def resolve_disease_id(disease_name: str) -> tuple[str, list[str]]:
         for result in results:
             label = result.get("label", "").lower()
             short_form = result.get("short_form", "")
-            # if not short_form[0:3].lower() in "efo_" :#("efo__", "mondo"):
-            #     continue  # Skip non-disease results
             
             # Calculate relevance score
             score = 0
